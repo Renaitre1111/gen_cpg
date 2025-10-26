@@ -7,6 +7,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import Counter
+from torch import optim
 import torch.nn.functional as F
 from torchvision import transforms
 from semilearn.core import ImbAlgorithmBase
@@ -16,6 +17,8 @@ from semilearn.datasets.augmentation import RandAugment
 from semilearn.algorithms.hooks import PseudoLabelingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.datasets.cv_datasets.datasetbase import BasicDataset
+from generate.ddpm_conditional import UNet_conditional, ConditionalDiffusion1D
+from .utils import label_to_noise, ema_update
 
 @IMB_ALGORITHMS.register('gen_cpg')
 class Gen_CPG(ImbAlgorithmBase):
@@ -148,6 +151,9 @@ class Gen_CPG(ImbAlgorithmBase):
         self.lb_ulb_dist = torch.from_numpy(lb_ulb_class_dist.astype(np.float32)).cuda(args.gpu)
 
         self.lb_select_ulb_dist = self.lb_dist + self.select_ulb_dist
+
+        # diffusion module
+        self.diff_scaler = torch.cuda.amp.GradScaler(enabled=self.args.amp)
 
     def train(self):
         """
@@ -556,6 +562,82 @@ class Gen_CPG(ImbAlgorithmBase):
                                          total_loss=total_loss.item(),
                                          util_ratio=mask.float().mean().item())
         return out_dict, log_dict
+
+    def diffusion_train(self, feature_dataloader_tr):
+        if self.dataset == "cifar10" or self.dataset == "cifar100":
+            model_unet = UNet_conditional(
+                dim=64,
+                dim_mults=(1, 2, 4, 8),
+                channels=1,
+                num_classes=self.num_classes
+            )
+
+            self.diffusion_model = ConditionalDiffusion1D(
+                model_unet,
+                seq_length=self.model.num_features,
+                timesteps=1000,
+                objective='pred_x0'
+            )
+        
+        elif self.dataset == "ImageNet":
+            model_unet = UNet_conditional(
+                dim=512,
+                dim_mults=(1, 2, 4),
+                channels=1,
+                num_classes=self.num_classes
+            )
+
+            self.diffusion_model = ConditionalDiffusion1D(
+                model_unet,
+                seq_length=self.model.num_features,
+                timesteps=1000,
+                objective='pred_x0'
+            )
+
+        self.print_fn(self.diffusion_model,"\n\n\n",model_unet)
+
+        # Calculate the number of parameters
+        total_params = sum(p.numel() for p in model_unet.parameters())
+        self.print_fn(f"Total number of parameters: {total_params}")
+
+        # If you want to count only the trainable parameters
+        trainable_params = sum(p.numel() for p in model_unet.parameters() if p.requires_grad)
+        self.print_fn(f"Number of trainable parameters: {trainable_params}")
+
+        self.diffusion_model.cuda(self.args.gpu)
+
+        if self.args.is_diffusion_pretrained:
+            self.diffusion_model = torch.load(self.args.is_diffusion_pretrained)
+            self.print_fn("pre-trained loaded")    
+        else:
+            optimizer_diffusion = optim.SGD(self.diffusion_model.parameters(), lr=self.args.diffusion_lr)
+
+            for epoch in range(self.args.diffusion_epochs):
+                total_diffusion_loss = 0.0
+
+                for batch, data in enumerate(feature_dataloader_tr):
+                    feature, feature_label = data
+                    feature = feature.unsqueeze(1)
+                    feature = feature.cuda(self.args.gpu)
+                    feature_label = feature_label.cuda(self.args.gpu)
+
+                    optimizer_diffusion.zero_grad(set_to_none=True)
+                    with torch.cuda.amp.autocast(enabled=self.args.amp):
+                        diffusion_loss = self.diffusion_model(feature, feature_label)
+                    diffusion_loss = self.diffusion_model(feature, feature_label)
+                    total_diffusion_loss += diffusion_loss.item()
+
+                    self.diff_scaler.scale(diffusion_loss).backward()
+                    self.diff_scaler.step(optimizer_diffusion)
+                    self.diff_scaler.update()
+
+                    ema_update(self.diffusion_model, self.diffusion_ema, decay=self.args.ema_decay)
+                self.print_fn("epoch: {}, the diffusion loss is {}".format(epoch, (total_diffusion_loss / (batch+1))))
+
+                if epoch % 50 == 0:
+                    directory = '/saved_models/pretrained_models'
+
+                
 
     @staticmethod
     def get_argument():

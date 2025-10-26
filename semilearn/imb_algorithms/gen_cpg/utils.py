@@ -89,3 +89,32 @@ def _compute_class_centers(features, class_assignments, num_classes):
         vars.append(var)
     return torch.stack(means), torch.stack(vars)
 
+def label_to_noise(labels, class_num, channel_num=1, sequence_length=128, variance=0.001, seed=0):
+    gen = torch.Generator()
+    gen.manual_seed(seed)
+
+    class_means = torch.randn(class_num, channel_num, sequence_length, generator=gen)
+    means = class_means.index_select(0, labels)
+
+    std = math.sqrt(variance)
+    noise = torch.randn_like(means, generator=gen).mul_(std).add_(means)
+
+    return noise
+
+@torch.no_grad()
+def ema_update(model, averaged_model, decay):
+    """Incorporates updated model parameters into an exponential moving averaged
+    version of a model. It should be called after each optimizer step."""
+    model_params = dict(model.named_parameters())
+    averaged_params = dict(averaged_model.named_parameters())
+    assert model_params.keys() == averaged_params.keys()
+
+    for name, param in model_params.items():
+        averaged_params[name].mul_(decay).add_(param, alpha=1 - decay)
+
+    model_buffers = dict(model.named_buffers())
+    averaged_buffers = dict(averaged_model.named_buffers())
+    assert model_buffers.keys() == averaged_buffers.keys()
+
+    for name, buf in model_buffers.items():
+        averaged_buffers[name].copy_(buf)
