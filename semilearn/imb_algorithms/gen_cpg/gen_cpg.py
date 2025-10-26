@@ -13,6 +13,7 @@ from torchvision import transforms
 from semilearn.core import ImbAlgorithmBase
 from semilearn.core.utils import IMB_ALGORITHMS
 from semilearn.core.utils import get_data_loader
+from semilearn.core.utils import EMA
 from semilearn.datasets.augmentation import RandAugment
 from semilearn.algorithms.hooks import PseudoLabelingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
@@ -564,6 +565,9 @@ class Gen_CPG(ImbAlgorithmBase):
         return out_dict, log_dict
 
     def diffusion_train(self, feature_dataloader_tr):
+        save_directory = os.path.join(self.args.save_dir, self.args.save_name, 'diffusion_models')
+        os.makedirs(save_directory, exist_ok=True)
+        
         if self.dataset == "cifar10" or self.dataset == "cifar100":
             model_unet = UNet_conditional(
                 dim=64,
@@ -578,6 +582,9 @@ class Gen_CPG(ImbAlgorithmBase):
                 timesteps=1000,
                 objective='pred_x0'
             )
+
+            self.diffusion_ema = EMA(self.diffusion_model, decay=self.args.ema_decay)
+            self.diffusion_ema.register()
         
         elif self.dataset == "ImageNet":
             model_unet = UNet_conditional(
@@ -593,6 +600,9 @@ class Gen_CPG(ImbAlgorithmBase):
                 timesteps=1000,
                 objective='pred_x0'
             )
+
+            self.diffusion_ema = EMA(self.diffusion_model, decay=self.args.ema_decay)
+            self.diffusion_ema.register()
 
         self.print_fn(self.diffusion_model,"\n\n\n",model_unet)
 
@@ -624,18 +634,22 @@ class Gen_CPG(ImbAlgorithmBase):
                     optimizer_diffusion.zero_grad(set_to_none=True)
                     with torch.cuda.amp.autocast(enabled=self.args.amp):
                         diffusion_loss = self.diffusion_model(feature, feature_label)
-                    diffusion_loss = self.diffusion_model(feature, feature_label)
                     total_diffusion_loss += diffusion_loss.item()
 
                     self.diff_scaler.scale(diffusion_loss).backward()
                     self.diff_scaler.step(optimizer_diffusion)
                     self.diff_scaler.update()
+                    self.diffusion_ema.update()
 
-                    ema_update(self.diffusion_model, self.diffusion_ema, decay=self.args.ema_decay)
                 self.print_fn("epoch: {}, the diffusion loss is {}".format(epoch, (total_diffusion_loss / (batch+1))))
 
-                if epoch % 50 == 0:
-                    directory = '/saved_models/pretrained_models'
+                save_interval = 50
+
+                if (epoch + 1) % save_interval == 0 or (epoch + 1) == self.args.diffusion_epochs:
+                    save_path = os.path.join(save_directory, f'diffusion_model_epoch_{epoch+1}.pth')
+                    
+                    torch.save(self.diffusion_model.state_dict(), save_path)
+                    self.print_fn(f"Diffusion model saved to: {save_path}")
 
                 
 
