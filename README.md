@@ -22,7 +22,7 @@ CUDA_VISIBLE_DEVICES=0 python train.py --c "config/config-0/gen_cpg/203-fixmatch
 ```
 
 ```
-CUDA_VISIBLE_DEVICES=0 python train.py --c "config/config-0/gen_cpg/203-fixmatch_gen_cpg_cifar10_lb400_100_ulb4600_100_random_0.0_0-resume.yaml"
+CUDA_VISIBLE_DEVICES=0 python train.py --c "config/203-fixmatch_cpg_cifar10_lb400_100_ulb4600_100_random_0.0_1.yaml"
 ```
 
 (Note: I know that USB supports multi-GPUs, but I still recommend you to run on single GPU, as some weird problems may occur.)

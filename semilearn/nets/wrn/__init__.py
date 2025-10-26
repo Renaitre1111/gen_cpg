@@ -4,3 +4,4 @@
 from .wrn import wrn_28_2
 from .rotwrn import rot_wrn_28_2
 from .birotwrn import bi_rot_wrn_28_2
+from .birotwrn_64 import bi_rot_wrn_64

@@ -168,14 +168,14 @@ class WideResNet(nn.Module):
         return nwd
 
 
-def bi_rot_wrn_28_2(pretrained=False, pretrained_path=None, **kwargs):
+def bi_rot_wrn_64(pretrained=False, pretrained_path=None, **kwargs):
     model = WideResNet(first_stride=1, depth=28, widen_factor=2, **kwargs)
     if pretrained:
         model = load_checkpoint(model, pretrained_path)
     return model
 
 
-def bi_rot_wrn_28_8(pretrained=False, pretrained_path=None, **kwargs):
+def bi_rot_wrn_8_64(pretrained=False, pretrained_path=None, **kwargs):
     model = WideResNet(first_stride=1, depth=28, widen_factor=8, **kwargs)
     if pretrained:
         model = load_checkpoint(model, pretrained_path)
