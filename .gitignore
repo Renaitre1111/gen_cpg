@@ -1,0 +1,6 @@
+*.zip
+*.gz
+*.tar
+generate/
+config/
+saved_models/
