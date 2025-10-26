@@ -566,8 +566,8 @@ class Gen_CPG(ImbAlgorithmBase):
 
     def diffusion_train(self, feature_dataloader_tr):
         save_directory = os.path.join(self.args.save_dir, self.args.save_name, 'diffusion_models')
-        os.makedirs(save_directory, exist_ok=True)
-        
+        os.makedirs(save_directory, exist_ok=True) # Ensure the directory exists
+
         if self.dataset == "cifar10" or self.dataset == "cifar100":
             model_unet = UNet_conditional(
                 dim=64,
@@ -583,10 +583,11 @@ class Gen_CPG(ImbAlgorithmBase):
                 objective='pred_x0'
             )
 
-            self.diffusion_ema = EMA(self.diffusion_model, decay=self.args.ema_decay)
+            # Initialize EMA model right after creating the base diffusion model
+            self.diffusion_ema = EMA(self.diffusion_model, decay=self.args.ema_decay) 
             self.diffusion_ema.register()
-        
-        elif self.dataset == "ImageNet":
+
+        elif self.dataset == "ImageNet": 
             model_unet = UNet_conditional(
                 dim=512,
                 dim_mults=(1, 2, 4),
@@ -601,29 +602,48 @@ class Gen_CPG(ImbAlgorithmBase):
                 objective='pred_x0'
             )
 
+            # Initialize EMA model
             self.diffusion_ema = EMA(self.diffusion_model, decay=self.args.ema_decay)
             self.diffusion_ema.register()
 
-        self.print_fn(self.diffusion_model,"\n\n\n",model_unet)
+        else:
+            raise ValueError(f"Diffusion model configuration not defined for dataset: {self.dataset}")
+
+
+        self.print_fn("Diffusion Model Structure:\n", self.diffusion_model)
+        self.print_fn("\nUnderlying UNet Structure:\n", model_unet)
 
         # Calculate the number of parameters
-        total_params = sum(p.numel() for p in model_unet.parameters())
-        self.print_fn(f"Total number of parameters: {total_params}")
+        total_params = sum(p.numel() for p in self.diffusion_model.parameters()) # Count params of the whole diffusion model
+        self.print_fn(f"Total number of parameters (Diffusion Model): {total_params}")
 
-        # If you want to count only the trainable parameters
-        trainable_params = sum(p.numel() for p in model_unet.parameters() if p.requires_grad)
-        self.print_fn(f"Number of trainable parameters: {trainable_params}")
+        trainable_params = sum(p.numel() for p in self.diffusion_model.parameters() if p.requires_grad)
+        self.print_fn(f"Number of trainable parameters (Diffusion Model): {trainable_params}")
 
         self.diffusion_model.cuda(self.args.gpu)
 
-        if self.args.is_diffusion_pretrained:
-            self.diffusion_model = torch.load(self.args.is_diffusion_pretrained)
-            self.print_fn("pre-trained loaded")    
+        if hasattr(self.args, 'is_diffusion_pretrained') and self.args.is_diffusion_pretrained:
+            try:
+                checkpoint = torch.load(self.args.is_diffusion_pretrained, map_location=f'cuda:{self.args.gpu}')
+                if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                    self.diffusion_model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    self.diffusion_model.load_state_dict(checkpoint)
+
+                self.print_fn("Pre-trained diffusion model loaded from:", self.args.is_diffusion_pretrained)
+                self.diffusion_ema = EMA(self.diffusion_model, decay=self.args.ema_decay)
+                self.diffusion_ema.register()
+
+            except Exception as e:
+                self.print_fn(f"Starting training from scratch.")
+                optimizer_diffusion = optim.SGD(self.diffusion_model.parameters(), lr=self.args.diffusion_lr)
+
         else:
             optimizer_diffusion = optim.SGD(self.diffusion_model.parameters(), lr=self.args.diffusion_lr)
 
-            for epoch in range(self.args.diffusion_epochs):
+            for epoch in range(self.args.diffusion_epochs): 
                 total_diffusion_loss = 0.0
+                num_batches = 0
 
                 for batch, data in enumerate(feature_dataloader_tr):
                     feature, feature_label = data
@@ -634,24 +654,43 @@ class Gen_CPG(ImbAlgorithmBase):
                     optimizer_diffusion.zero_grad(set_to_none=True)
                     with torch.cuda.amp.autocast(enabled=self.args.amp):
                         diffusion_loss = self.diffusion_model(feature, feature_label)
-                    total_diffusion_loss += diffusion_loss.item()
 
+                    if torch.isnan(diffusion_loss):
+                        self.print_fn(f"NaN loss detected at epoch {epoch}, batch {batch}. Skipping update.")
+                        continue # Skip backprop and optimizer step if loss is NaN
+
+                    total_diffusion_loss += diffusion_loss.item()
+                    num_batches += 1
+
+                    # Scale loss and backpropagate
                     self.diff_scaler.scale(diffusion_loss).backward()
                     self.diff_scaler.step(optimizer_diffusion)
                     self.diff_scaler.update()
                     self.diffusion_ema.update()
 
-                self.print_fn("epoch: {}, the diffusion loss is {}".format(epoch, (total_diffusion_loss / (batch+1))))
+                average_loss = total_diffusion_loss / num_batches if num_batches > 0 else 0.0
+                self.print_fn("Diffusion Training - Epoch: {}, Average Loss: {}".format(epoch + 1, average_loss))
 
-                save_interval = 50
+                save_interval = 50 
 
-                if (epoch + 1) % save_interval == 0 or (epoch + 1) == self.args.diffusion_epochs:
+                if (epoch + 1) % save_interval == 0:
                     save_path = os.path.join(save_directory, f'diffusion_model_epoch_{epoch+1}.pth')
-                    
                     torch.save(self.diffusion_model.state_dict(), save_path)
                     self.print_fn(f"Diffusion model saved to: {save_path}")
 
-                
+                if (epoch + 1) == self.args.diffusion_epochs:
+                    ema_save_path = os.path.join(save_directory, f'diffusion_model_ema_final.pth')
+                    self.diffusion_ema.apply_shadow()
+                    torch.save(self.diffusion_model.state_dict(), ema_save_path)
+                    # Restore original weights
+                    self.diffusion_ema.restore()
+                    self.print_fn(f"Final Diffusion EMA model saved to: {ema_save_path}")
+
+                    # Also save the final non-EMA model state
+                    final_save_path = os.path.join(save_directory, f'diffusion_model_final.pth')
+                    torch.save(self.diffusion_model.state_dict(), final_save_path)
+                    self.print_fn(f"Final Diffusion model saved to: {final_save_path}")
+          
 
     @staticmethod
     def get_argument():
