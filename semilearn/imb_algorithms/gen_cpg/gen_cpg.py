@@ -566,7 +566,7 @@ class Gen_CPG(ImbAlgorithmBase):
 
     def diffusion_train(self, feature_dataloader_tr):
         save_directory = os.path.join(self.args.save_dir, self.args.save_name, 'diffusion_models')
-        os.makedirs(save_directory, exist_ok=True) # Ensure the directory exists
+        os.makedirs(save_directory, exist_ok=True)
 
         if self.dataset == "cifar10" or self.dataset == "cifar100":
             model_unet = UNet_conditional(
