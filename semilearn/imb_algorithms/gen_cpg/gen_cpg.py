@@ -19,7 +19,7 @@ from semilearn.algorithms.hooks import PseudoLabelingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.datasets.cv_datasets.datasetbase import BasicDataset
 from generate.ddpm_conditional import UNet_conditional, ConditionalDiffusion1D
-from .utils import label_to_noise, ema_update
+from .utils import label_to_noise
 
 @IMB_ALGORITHMS.register('gen_cpg')
 class Gen_CPG(ImbAlgorithmBase):
@@ -623,23 +623,18 @@ class Gen_CPG(ImbAlgorithmBase):
         self.diffusion_model.cuda(self.args.gpu)
 
         if hasattr(self.args, 'is_diffusion_pretrained') and self.args.is_diffusion_pretrained:
-            try:
-                checkpoint = torch.load(self.args.is_diffusion_pretrained, map_location=f'cuda:{self.args.gpu}')
-                if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                    self.diffusion_model.load_state_dict(checkpoint['model_state_dict'])
-                else:
-                    self.diffusion_model.load_state_dict(checkpoint)
+            checkpoint = torch.load(self.args.is_diffusion_pretrained, map_location=f'cuda:{self.args.gpu}')
+            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                self.diffusion_model.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                self.diffusion_model.load_state_dict(checkpoint)
 
-                self.print_fn("Pre-trained diffusion model loaded from:", self.args.is_diffusion_pretrained)
-                self.diffusion_ema = EMA(self.diffusion_model, decay=self.args.ema_decay)
-                self.diffusion_ema.register()
-
-            except Exception as e:
-                self.print_fn(f"Starting training from scratch.")
-                optimizer_diffusion = optim.SGD(self.diffusion_model.parameters(), lr=self.args.diffusion_lr)
+            self.print_fn("Pre-trained diffusion model loaded from:", self.args.is_diffusion_pretrained)
+            self.diffusion_ema = EMA(self.diffusion_model, decay=self.args.ema_decay)
+            self.diffusion_ema.register()
 
         else:
-            optimizer_diffusion = optim.SGD(self.diffusion_model.parameters(), lr=self.args.diffusion_lr)
+            optimizer_diffusion = optim.Adam(self.diffusion_model.parameters(), lr=self.args.diffusion_lr, weight_decay=self.args.diffusion_weight_decay)
 
             for epoch in range(self.args.diffusion_epochs): 
                 total_diffusion_loss = 0.0
@@ -657,7 +652,7 @@ class Gen_CPG(ImbAlgorithmBase):
 
                     if torch.isnan(diffusion_loss):
                         self.print_fn(f"NaN loss detected at epoch {epoch}, batch {batch}. Skipping update.")
-                        continue # Skip backprop and optimizer step if loss is NaN
+                        continue
 
                     total_diffusion_loss += diffusion_loss.item()
                     num_batches += 1
@@ -698,4 +693,9 @@ class Gen_CPG(ImbAlgorithmBase):
             SSL_Argument('--warm_up', int, 30),
             SSL_Argument('--alpha', float, 1.0),
             SSL_Argument('--smoothing', float, 0.1),
+            SSL_Argument('--diffusion_epochs', int, 200, help='Number of epochs to train the diffusion model (from LDMLR paper)'),
+            SSL_Argument('--diffusion_lr', float, 1e-3, help='Learning rate for the diffusion model optimizer (Adam, from LDMLR paper)'),
+            SSL_Argument('--diffusion_weight_decay', float, 0.0, help='Weight decay (L2 penalty) for the diffusion model Adam optimizer (LDMLR paper did not specify non-zero)'),
+            SSL_Argument('--ema_decay', float, 0.999, help='EMA decay rate for the diffusion model (common default, paper does not specify)'),
+            SSL_Argument('--is_diffusion_pretrained', str, None, help='Path to the pre-trained diffusion model checkpoint (optional, LDMLR trains from scratch)'),
         ]
