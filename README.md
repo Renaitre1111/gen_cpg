@@ -35,4 +35,7 @@ For example,
 ## Results
 
 ## simsiam training
-python simsiam/finetune.py --data ./data/ --arch resnet18 --lr 1e-3 --epochs 250 --seed 0 --save_freq 30 --save_dir simsiam/saved_model/ --fix_pred_lr
+python simsiam/finetune.py --data ./data/ --lb_idx_path simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy --ulb_idx_path simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/ulb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy --arch resnet18 --lr 1e-3 --epochs 250 --seed 0 --save_freq 30 --save_dir simsiam/saved_model/ --fix_pred_lr
+
+# linear eval
+python simsiam/linear_eval.py --data ./data/ --pretrained simsiam/saved_model/checkpoint_final.pth --lb_idx_path simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy --arch resnet18 --lr 0.1 --epochs 100 --seed 0 --wd 0
