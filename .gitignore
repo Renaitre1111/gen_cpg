@@ -5,3 +5,4 @@ generate/archive.zip
 generate/cifar-10-python.tar.gz
 config/
 saved_models/
+labeled_idx/
