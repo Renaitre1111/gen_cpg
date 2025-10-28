@@ -31,9 +31,9 @@ class SimSiam(nn.Module):
         self.encoder.fc = nn.Sequential(nn.Linear(prev_dim, prev_dim, bias=False),
                                         nn.BatchNorm1d(prev_dim),
                                         nn.ReLU(inplace=True), # first layer
-                                        nn.Linear(prev_dim, prev_dim, bias=False),
-                                        nn.BatchNorm1d(prev_dim),
-                                        nn.ReLU(inplace=True), # second layer
+                                        #nn.Linear(prev_dim, prev_dim, bias=False),
+                                        #nn.BatchNorm1d(prev_dim),
+                                        #nn.ReLU(inplace=True), # second layer
                                         nn.Linear(prev_dim, dim, bias=False),
                                         nn.BatchNorm1d(dim, affine=False)) # output layer
 

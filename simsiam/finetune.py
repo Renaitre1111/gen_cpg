@@ -38,7 +38,7 @@ model_names = sorted(name for name in models.__dict__
 parser = argparse.ArgumentParser(description='PyTorch cifar10 finetuning')
 parser.add_argument('--data', metavar='DIR',
                     help='path to dataset')
-parser.add_argument('--arch', metavar='ARCH', default='resnet50',
+parser.add_argument('--arch', metavar='ARCH', default='resnet18',
                     choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
@@ -154,7 +154,7 @@ def main():
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
-            }, is_best=False, filename=save_dir + 'checkpoint_{:04d}.pth.tar'.format(epoch+1))
+            }, is_best=False, filename=save_dir + 'checkpoint_{:04d}.pth'.format(epoch+1))
 
     print("==> Saving final model")
     save_checkpoint({
