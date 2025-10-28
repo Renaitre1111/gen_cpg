@@ -36,20 +36,20 @@ model_names = sorted(name for name in models.__dict__
     and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch cifar10 finetuning')
-parser.add_argument('data', metavar='DIR',
+parser.add_argument('--data', metavar='DIR',
                     help='path to dataset')
-parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
+parser.add_argument('--arch', metavar='ARCH', default='resnet50',
                     choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet50)')
-parser.add_argument('-j', '--workers', default=32, type=int, metavar='N',
+parser.add_argument('--workers', default=32, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
 parser.add_argument('--epochs', default=800, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=512, type=int,
+parser.add_argument('--batch_size', default=512, type=int,
                     metavar='N',
                     help='mini-batch size (default: 512)')
 parser.add_argument('--lr', '--learning-rate', default=0.05, type=float,
@@ -59,21 +59,20 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
-parser.add_argument('-p', '--print-freq', default=10, type=int,
-                    metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
-parser.add_argument('--save-freq', default=20, type=int, metavar='N',
+parser.add_argument('--save_freq', default=20, type=int, metavar='N',
                     help='save checkpoint every N epochs (default: 20)')
+parser.add_argument('--save_dir', default='simsiam/saved_model', help='path to save model')
 
 # simsiam specific configs:
 parser.add_argument('--dim', default=2048, type=int,
                     help='feature dimension (default: 2048)')
-parser.add_argument('--pred-dim', default=512, type=int,
+parser.add_argument('--pred_dim', default=512, type=int,
                     help='hidden dimension of the predictor (default: 512)')
-parser.add_argument('--fix-pred-lr', action='store_true',
+parser.add_argument('--fix_pred_lr', action='store_true',
                     help='Fix learning rate for the predictor')
 
 
@@ -83,6 +82,10 @@ def main():
     if args.seed is not None:
         set_seed(args.seed)
 
+    save_dir = args.save_dir
+    if os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = builder.SimSiam(
@@ -91,7 +94,7 @@ def main():
     )
 
     model.to(device)
-    init_lr = args.lr * args.batch_size / 256
+    init_lr = args.lr
     criterion = nn.CosineSimilarity(dim=1).to(device)
 
     if args.fix_pred_lr:
@@ -112,7 +115,6 @@ def main():
             optimizer.load_state_dict(checkpoint['optimizer'])
     
     cudnn.benchmark = False
-    traindir = os.path.join(args.data, 'train')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     augmentation = [
@@ -127,8 +129,8 @@ def main():
         normalize
     ]
 
-    lb_idx = np.load("label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy")
-    ulb_idx = np.load("label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/ulb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy")
+    lb_idx = np.load("simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy")
+    ulb_idx = np.load("simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/ulb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy")
     train_idx = np.concatenate((lb_idx, ulb_idx), axis=0)
 
     all_train_data = torchvision.datasets.CIFAR10(root=args.data, train=True, download=False, transform=None)
@@ -142,7 +144,8 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
         adjust_learning_rate(optimizer, init_lr, epoch, args)
 
-        train(train_loader, model, criterion, optimizer, epoch, args, device)
+        avg_loss = train(train_loader, model, criterion, optimizer, epoch, args, device)
+        print(f"==> Epoch [{epoch+1}/{args.epochs}] Completed. \t Average Loss: {avg_loss:.6f}")
 
         if (epoch + 1) % args.save_freq == 0:
             print(f"==> Saving checkpoint for epoch {epoch + 1}")
@@ -151,7 +154,7 @@ def main():
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
-            }, is_best=False, filename='checkpoint_{:04d}.pth.tar'.format(epoch+1))
+            }, is_best=False, filename=save_dir + 'checkpoint_{:04d}.pth.tar'.format(epoch+1))
 
     print("==> Saving final model")
     save_checkpoint({
@@ -159,10 +162,12 @@ def main():
         'arch': args.arch,
         'state_dict': model.state_dict(),
         'optimizer' : optimizer.state_dict(),
-    }, is_best=True, filename='checkpoint_final.pth')
+    }, is_best=True, filename=save_dir + 'checkpoint_final.pth')
 
 def train(train_loader, model, criterion, optimizer, epoch, args, device):
     model.train()
+    total_loss = 0.0
+    total_batches = 0
 
     loop = tqdm(train_loader, desc=f"Epoch [{epoch}/{args.epochs}]", leave=False)
 
@@ -179,7 +184,12 @@ def train(train_loader, model, criterion, optimizer, epoch, args, device):
 
         loop.set_postfix(loss=loss.item())
 
+        total_loss += loss.item()
+        total_batches += 1
+
     loop.close()
+
+    return total_loss / total_batches
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth'):
     torch.save(state, filename)

@@ -34,30 +34,5 @@ For example,
 
 ## Results
 
-## generate
-```
-accelerate launch generate/train_conditional.py \
-  --train_data_dir="generate/cifar10/train" \
-  --model_config_name_or_path="generate/config.json" \
-  --resolution=32 \
-  --output_dir="generate/pretrained_weights_cifar10" \
-  --train_batch_size=1024 \
-  --dataloader_num_workers=20 \
-  --eval_batch_size=10 \
-  --num_epochs=2000 \
-  --use_ema \
-  --learning_rate=1e-4 \
-  --lr_warmup_steps=1000 \
-  --mixed_precision="bf16" \
-  --save_images_epochs=20 \
-  --ddpm_beta_schedule="squaredcos_cap_v2" \
-  --checkpointing_steps=1000 \
-  --resume_from_checkpoint="latest" \
-  --num_classes=10 \
-  --prediction_type="epsilon" \
-  --logger="tensorboard"
-```
-
-```
-python generate/sampling.py 
-```
+## simsiam training
+python simsiam/finetune.py --data ./data/ --lr 3e-4 --seed 0 --save_freq 100 --save_dir simsiam/saved_model --fix_pred_lr
