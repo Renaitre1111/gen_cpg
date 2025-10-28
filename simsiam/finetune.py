@@ -13,8 +13,10 @@ import random
 import shutil
 import time
 import warnings
+import numpy as np
 
 import torch
+import torchvision
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
@@ -25,7 +27,7 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 
 from tqdm import tqdm
-
+from dataset import SimSiamDataset
 import loader
 import builder
 
@@ -109,12 +111,12 @@ def main():
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
     
-    cudnn.benchmark = True
+    cudnn.benchmark = False
     traindir = os.path.join(args.data, 'train')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     augmentation = [
-        transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
+        transforms.RandomResizedCrop(224, scale=(0.4, 1.)),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
         ], p=0.8),
@@ -125,14 +127,17 @@ def main():
         normalize
     ]
 
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        loader.TwoCropsTransform(transforms.Compose(augmentation)))
-    
+    lb_idx = np.load("label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy")
+    ulb_idx = np.load("label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/ulb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy")
+    train_idx = np.concatenate((lb_idx, ulb_idx), axis=0)
+
+    all_train_data = torchvision.datasets.CIFAR10(root=args.data, train=True, download=False, transform=None)
+
+    train_data = all_train_data.data[train_idx]
+    train_dataset = SimSiamDataset(train_data, loader.TwoCropsTransform(transforms.Compose(augmentation)))
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True, drop_last=True
-    )
+        num_workers=args.workers, pin_memory=True, drop_last=True)
 
     for epoch in range(args.start_epoch, args.epochs):
         adjust_learning_rate(optimizer, init_lr, epoch, args)
@@ -161,11 +166,11 @@ def train(train_loader, model, criterion, optimizer, epoch, args, device):
 
     loop = tqdm(train_loader, desc=f"Epoch [{epoch}/{args.epochs}]", leave=False)
 
-    for i, (images, _) in enumerate(loop):
-        images[0] = images[0].to(device, non_blocking=True)
-        images[1] = images[1].to(device, non_blocking=True)
+    for i, (img1, img2) in enumerate(loop):
+        img1 = img1.to(device, non_blocking=True)
+        img2 = img2.to(device, non_blocking=True)
 
-        p1, p2, z1, z2 = model(x1=images[0], x2=images[1])
+        p1, p2, z1, z2 = model(x1=img1, x2=img2)
         loss = -(criterion(p1, z2).mean() + criterion(p2, z1).mean()) * 0.5
 
         optimizer.zero_grad()

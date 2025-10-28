@@ -1,8 +1,7 @@
 *.zip
 *.gz
 *.tar
-generate/archive.zip
-generate/cifar-10-python.tar.gz
+data/
 config/
 saved_models/
 labeled_idx/
