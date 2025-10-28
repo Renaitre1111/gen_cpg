@@ -21,7 +21,10 @@ class SimSiam(nn.Module):
 
         # create the encoder
         # num_classes is the output fc dimension, zero-initialize last BNs
-        self.encoder = base_encoder(num_classes=dim, zero_init_residual=True)
+        self.encoder = base_encoder(pretrained=True, zero_init_residual=True)
+
+        self.encoder.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.encoder.maxpool = nn.Identity()
 
         # build a 3-layer projector
         prev_dim = self.encoder.fc.weight.shape[1]
