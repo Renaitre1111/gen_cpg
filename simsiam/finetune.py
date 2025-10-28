@@ -83,7 +83,7 @@ def main():
         set_seed(args.seed)
 
     save_dir = args.save_dir
-    if os.path.exists(save_dir):
+    if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
