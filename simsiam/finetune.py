@@ -74,6 +74,11 @@ parser.add_argument('--pred_dim', default=512, type=int,
                     help='hidden dimension of the predictor (default: 512)')
 parser.add_argument('--fix_pred_lr', action='store_true',
                     help='Fix learning rate for the predictor')
+parser.add_argument('--lb_idx_path', default="simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy",
+                    type=str, help='path to the labeled data index file')
+parser.add_argument('--ulb_idx_path', default="simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/ulb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy", 
+                    type=str, help='path to the unlabeled data index file')
+
 
 
 def main():
@@ -129,8 +134,8 @@ def main():
         normalize
     ]
 
-    lb_idx = np.load("simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy")
-    ulb_idx = np.load("simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/ulb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy")
+    lb_idx = np.load(args.lb_idx_path)
+    ulb_idx = np.load(args.ulb_idx_path)
     train_idx = np.concatenate((lb_idx, ulb_idx), axis=0)
 
     all_train_data = torchvision.datasets.CIFAR10(root=args.data, train=True, download=False, transform=None)

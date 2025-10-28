@@ -35,4 +35,4 @@ For example,
 ## Results
 
 ## simsiam training
-python simsiam/finetune.py --data ./data/ --arch resnet18 --lr 1e-3 --epochs 250 --seed 0 --save_freq 100 --save_dir simsiam/saved_model/ --fix_pred_lr
+python simsiam/finetune.py --data ./data/ --arch resnet18 --lr 1e-3 --epochs 250 --seed 0 --save_freq 30 --save_dir simsiam/saved_model/ --fix_pred_lr
