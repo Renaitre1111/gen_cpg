@@ -16,13 +16,13 @@ config = {
     "clip_model_name": "openai/clip-vit-base-patch32",
     "output_dir": "diffusion_model/saved_models/",
     "image_size": 32,
-    "batch_size": 2560,
+    "batch_size": 1536,
     "num_epochs": 150,
-    "learning_rate": 3e-4,
+    "learning_rate": 2e-4,
     "embedding_dim": 512,
     "mixed_precision": "bf16",
     "save_freq_epochs": 10,
-    "num_workers": 32
+    "num_workers": 16
 }
 
 def get_imagenet_label_names():
