@@ -14,19 +14,19 @@ from accelerate import Accelerator
 config = {
     "dataset_name": "benjamin-paine/imagenet-1k-32x32",
     "clip_model_name": "openai/clip-vit-base-patch32",
-    "output_dir": "diffusion_model/saved_models",
+    "output_dir": "diffusion_model/saved_models/",
     "image_size": 32,
-    "batch_size": 512,
+    "batch_size": 2560,
     "num_epochs": 150,
-    "learning_rate": 1e-4,
+    "learning_rate": 3e-4,
     "embedding_dim": 512,
-    "mixed_precision": "fp16",
+    "mixed_precision": "bf16",
     "save_freq_epochs": 10,
-    "num_works": 16
+    "num_workers": 32
 }
 
 def get_imagenet_label_names():
-    builder = load_dataset_builder("imagenet-1k")
+    builder = load_dataset_builder(config["dataset_name"])
     return builder.info.features["label"].names
 
 def setup_dataset(label_names, tokenizer):
@@ -35,7 +35,7 @@ def setup_dataset(label_names, tokenizer):
     image_transforms = transforms.Compose([
         transforms.Lambda(lambda img: img.convert("RGB")),
         transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5])
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
     ])
 
     def preprocess(examples):
