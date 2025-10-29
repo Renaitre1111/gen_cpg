@@ -138,7 +138,7 @@ def main():
     ulb_idx = np.load(args.ulb_idx_path)
     train_idx = np.concatenate((lb_idx, ulb_idx), axis=0)
 
-    all_train_data = torchvision.datasets.CIFAR10(root=args.data, train=True, download=False, transform=None)
+    all_train_data = torchvision.datasets.CIFAR10(root=args.data, train=True, download=True, transform=None)
 
     train_data = all_train_data.data[train_idx]
     train_dataset = SimSiamDataset(train_data, loader.TwoCropsTransform(transforms.Compose(augmentation)))

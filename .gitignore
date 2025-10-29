@@ -4,3 +4,4 @@
 data/
 config/
 saved_models/
+simsiam/saved_model/

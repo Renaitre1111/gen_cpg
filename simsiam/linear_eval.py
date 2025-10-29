@@ -118,7 +118,7 @@ def main():
     val_dataset = datasets.CIFAR10(args.data, train=False, transform=val_transforms, download=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=True)
 
-    train_transform = torch.Compose([
+    train_transform = transforms.Compose([
         transforms.RandomResizedCrop(32, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
@@ -204,3 +204,6 @@ def set_seed(seed):
     warnings.warn('You have chosen to seed training. '
                   'This will turn on the CUDNN deterministic setting, '
                   'which can slow down your training considerably!')
+    
+if __name__ == '__main__':
+    main()
