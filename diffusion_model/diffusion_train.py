@@ -16,12 +16,13 @@ config = {
     "clip_model_name": "openai/clip-vit-base-patch32",
     "output_dir": "diffusion_model/saved_models",
     "image_size": 32,
-    "batch_size": 128,
+    "batch_size": 512,
     "num_epochs": 150,
     "learning_rate": 1e-4,
     "embedding_dim": 512,
     "mixed_precision": "fp16",
-    "save_freq_epochs": 10
+    "save_freq_epochs": 10,
+    "num_works": 16
 }
 
 def get_imagenet_label_names():
@@ -68,12 +69,13 @@ def main():
     text_encoder = CLIPTextModel.from_pretrained(config["clip_model_name"])
 
     text_encoder.requires_grad_(False)
+    text_encoder.eval()
 
     labels_names = get_imagenet_label_names()
 
     train_dataset = setup_dataset(labels_names, tokenizer)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, num_workers=20)
+    train_dataloader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, num_workers=config["num_workers"])
 
     unet = UNet2DConditionModel(
         sample_size=config["image_size"],
@@ -100,6 +102,8 @@ def main():
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, optimizer, train_dataloader, lr_scheduler
     )
+
+    text_encoder.to(accelerator.device)
 
     for epoch in range(config["num_epochs"]):
         unet.train()
