@@ -1,9 +1,9 @@
 import os
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import torch
-import torch.nn.fuctional as F
+import torch.nn.functional as F
 from datasets import load_dataset, load_dataset_builder
-from diffusers import DDPMScheduler, UNet2DConditionalModel
+from diffusers import DDPMScheduler, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
 from transformers import CLIPTextModel, CLIPTokenizer
 from torch.utils.data import DataLoader
@@ -20,7 +20,8 @@ config = {
     "num_epochs": 150,
     "learning_rate": 1e-4,
     "embedding_dim": 512,
-    "mixed_precision": "fp16"
+    "mixed_precision": "fp16",
+    "save_freq_epochs": 10
 }
 
 def get_imagenet_label_names():
@@ -66,7 +67,7 @@ def main():
     tokenizer = CLIPTokenizer.from_pretrained(config["clip_model_name"])
     text_encoder = CLIPTextModel.from_pretrained(config["clip_model_name"])
 
-    text_encoder.required_grad_(False)
+    text_encoder.requires_grad_(False)
 
     labels_names = get_imagenet_label_names()
 
@@ -74,7 +75,7 @@ def main():
 
     train_dataloader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, num_workers=20)
 
-    unet = UNet2DConditionalModel(
+    unet = UNet2DConditionModel(
         sample_size=config["image_size"],
         in_channels=3,
         out_channels=3,
@@ -96,12 +97,14 @@ def main():
         num_training_steps=(len(train_dataloader) * config["num_epochs"]),
     )
 
-    unet, optimizer, train_dataloader = accelerator.prepare(
+    unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, optimizer, train_dataloader, lr_scheduler
     )
 
     for epoch in range(config["num_epochs"]):
         unet.train()
+
+        total_loss = 0.0
         progress_bar = tqdm(total=len(train_dataloader), disable=not accelerator.is_local_main_process)
         progress_bar.set_description(f"Epoch {epoch + 1}")
 
@@ -114,7 +117,7 @@ def main():
 
             noise = torch.randn_like(images)
             timesteps = torch.randint(
-                0, noise_scheduler.config.num_train_timesteps, (images.shaope[0],), device=accelerator.device
+                0, noise_scheduler.config.num_train_timesteps, (images.shape[0],), device=accelerator.device
             ).long()
             noisy_images = noise_scheduler.add_noise(images, noise, timesteps)
 
@@ -125,10 +128,11 @@ def main():
                     encoder_hidden_states=text_embeddings
                 ).sample
                 loss = F.mse_loss(noise_pred, noise)
+            total_loss += loss.item()
 
             accelerator.backward(loss)
 
-            if accelerator.sync_gradients():
+            if accelerator.sync_gradients:
                 accelerator.clip_grad_norm_(unet.parameters(), 1.0)
 
             optimizer.step()
@@ -140,12 +144,18 @@ def main():
 
         progress_bar.close()
 
+        avg_loss = total_loss / len(train_dataloader)
+
         if accelerator.is_local_main_process:
-            unwrapped_model = accelerator.unwrap_model(unet)
-            epoch_output_dir = os.path.join(config["output_dir"], f"epoch_{epoch + 1}")
-            os.makedirs(epoch_output_dir, exist_ok=True)
-            unwrapped_model.save_pretrained(epoch_output_dir)
-            noise_scheduler.save_pretrained(epoch_output_dir)
+            print(f"epoch {epoch + 1} loss: {avg_loss:.4f}")
+
+        if accelerator.is_local_main_process:
+            if (epoch + 1) % config["save_freq_epochs"] == 0 or (epoch + 1) == config["num_epochs"]:
+                unwrapped_model = accelerator.unwrap_model(unet)
+                epoch_output_dir = os.path.join(config["output_dir"], f"epoch_{epoch + 1}")
+                os.makedirs(epoch_output_dir, exist_ok=True)
+                unwrapped_model.save_pretrained(epoch_output_dir)
+                noise_scheduler.save_config(epoch_output_dir)
 
 if __name__ == "__main__":
     main()
