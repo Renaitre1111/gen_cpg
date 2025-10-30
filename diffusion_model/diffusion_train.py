@@ -88,19 +88,19 @@ def main():
     tokenizer = CLIPTokenizer.from_pretrained(config["clip_model_name"])
     text_encoder = CLIPTextModel.from_pretrained(config["clip_model_name"])
 
+    text_encoder.to(accelerator.device)
     text_encoder.requires_grad_(False)
     text_encoder.eval()
 
     labels_names = get_imagenet_label_names()
+    label_embeddings = get_label_embeddings(labels_names, tokenizer, text_encoder, accelerator.device)
 
     with torch.no_grad():
         uncond_input = tokenizer(
             [""], padding="max_length", max_length=tokenizer.model_max_length, return_tensors="pt"
         )
-        uncond_embeddings = text_encoder(uncond_input.input_ids).last_hidden_state
+        uncond_embeddings = text_encoder(uncond_input.input_ids.to(accelerator.device)).last_hidden_state
 
-    label_embeddings = get_label_embeddings(labels_names, tokenizer, text_encoder, accelerator.device)
-    
     train_dataset = setup_dataset(labels_names)
 
     train_dataloader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, drop_last=True, num_workers=config["num_workers"], persistent_workers=True, pin_memory=True)
@@ -146,8 +146,10 @@ def main():
         dtype=torch.bfloat16 if config["mixed_precision"] == "bf16" else torch.float16
     )
 
-    text_encoder.to(accelerator.device)
-    uncond_embeddings = uncond_embeddings.to(accelerator.device)
+    uncond_embeddings = uncond_embeddings.to(
+        accelerator.device,
+        dtype=label_embeddings.dtype
+    )
 
     cond_drop_prob = 0.1
 
@@ -159,8 +161,8 @@ def main():
         progress_bar.set_description(f"Epoch {epoch + 1}")
 
         for step, batch in enumerate(train_dataloader):
-            images = batch["pixel_values"]
-            label_ids = batch["label"].to(accelerator.device)
+            images = batch["pixel_values"].to(accelerator.device, non_blocking=True)
+            label_ids = batch["label"].to(accelerator.device, non_blocking=True)
 
             with torch.no_grad():
                 text_embeddings = label_embeddings[label_ids]
