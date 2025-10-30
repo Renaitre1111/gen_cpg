@@ -79,9 +79,9 @@ def main():
 
     uncond_embeddings = get_uncond_embeddings(tokenizer, text_encoder, device, dtype) # (num_images_per_prompts)
 
-    conditinal_prompts = [f"a photo of a {label}" for label in CIFAR10_LABELS]
+    conditional_prompts = [f"a photo of a {label}" for label in CIFAR10_LABELS]
     all_cond_embeddings = get_text_embeddings(
-        conditinal_prompts, 
+        conditional_prompts, 
         tokenizer, 
         text_encoder, 
         device, 
