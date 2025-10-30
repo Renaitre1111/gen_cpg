@@ -1,4 +1,5 @@
 import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import torch
 from diffusers import UNet2DConditionModel, DDIMScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -17,8 +18,9 @@ inference_config = {
     "num_inference_steps": 50,
     "guidance_scale": 7.5,
     "num_images_per_prompts": 64,
-    "output_grid_dir": "diffusion_model/cifar10_grids/",
-    "mixed_precision_dtype": torch.bfloat16
+    "output_grid_dir": "diffusion_model/saved_images/cifar10_grids/",
+    "mixed_precision_dtype": torch.bfloat16,
+    "seed": 0
 }
 
 CIFAR10_LABELS = [
@@ -52,6 +54,8 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = inference_config["mixed_precision_dtype"]
 
+    set_seed(inference_config["seed"])
+
     tokenizer = CLIPTokenizer.from_pretrained(config["clip_model_name"])
     text_encoder = CLIPTextModel.from_pretrained(config["clip_model_name"])
     text_encoder.to(device, dtype).eval()
@@ -71,6 +75,7 @@ def main():
 
     scheduler = DDIMScheduler.from_pretrained(model_path)
     scheduler.set_timesteps(inference_config["num_inference_steps"])
+    scheduler.timesteps = scheduler.timesteps.to(device) 
 
     uncond_embeddings = get_uncond_embeddings(tokenizer, text_encoder, device, dtype) # (num_images_per_prompts)
 
@@ -83,7 +88,7 @@ def main():
         dtype
     )
 
-    generator = torch.Generator(device=device)
+    generator = torch.Generator(device=device).manual_seed(inference_config["seed"])
 
     for i, label_name in enumerate(tqdm(CIFAR10_LABELS, desc="Generating images for all labels")):
         cond_embeddings = all_cond_embeddings[i].unsqueeze(0).repeat(
@@ -95,7 +100,7 @@ def main():
         latents = torch.randn(
             (
                 inference_config["num_images_per_prompts"],
-                unet.in_channels,
+                unet.config.in_channels,
                 config["image_size"],
                 config["image_size"]
             ),
@@ -135,7 +140,13 @@ def main():
             images, 
             fp=save_path,
             nrow=8
-        ) 
+        )
+
+def set_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 if __name__ == "__main__":
     main()
