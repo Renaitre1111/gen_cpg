@@ -28,6 +28,14 @@ CIFAR10_LABELS = [
     "dog", "frog", "horse", "ship", "truck"
 ]
 
+def set_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    
+@torch.no_grad()
 def get_text_embeddings(prompts, tokenizer, text_encoder, device, dtype):
     text_inputs = tokenizer(
         prompts,
@@ -35,10 +43,10 @@ def get_text_embeddings(prompts, tokenizer, text_encoder, device, dtype):
         max_length=tokenizer.model_max_length,
         return_tensors="pt"
     )
-    with torch.no_grad():
-        text_embeddings = text_encoder(text_inputs.input_ids.to(device)).last_hidden_state
+    text_embeddings = text_encoder(text_inputs.input_ids.to(device)).last_hidden_state
     return text_embeddings.to(dtype)
 
+@torch.no_grad()
 def get_uncond_embeddings(tokenizer, text_encoder, device, dtype):
     return get_text_embeddings(
         [""] * inference_config["num_images_per_prompts"], 
@@ -141,12 +149,6 @@ def main():
             fp=save_path,
             nrow=8
         )
-
-def set_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
 
 if __name__ == "__main__":
     main()
