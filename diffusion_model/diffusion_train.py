@@ -11,6 +11,9 @@ from torchvision import transforms
 from tqdm import tqdm
 from accelerate import Accelerator
 
+torch.set_float32_matmul_precision('high')
+torch.backends.cudnn.benchmark = True
+
 config = {
     "dataset_name": "benjamin-paine/imagenet-1k-32x32",
     "clip_model_name": "openai/clip-vit-base-patch32",
@@ -22,16 +25,15 @@ config = {
     "embedding_dim": 512,
     "mixed_precision": "bf16",
     "save_freq_epochs": 10,
-    "num_workers": 2
+    "num_workers": 8
 }
 
 def get_imagenet_label_names():
     builder = load_dataset_builder(config["dataset_name"])
-    print(len(builder.info.features["label"].names))
     return builder.info.features["label"].names
 
-def setup_dataset(label_names, tokenizer):
-    dataset = load_dataset(config["dataset_name"], split="train")
+def setup_dataset(label_names):
+    dataset = load_dataset(config["dataset_name"], split="train", keep_in_memory=True)
 
     demo_split = dataset.train_test_split(
         train_size=0.1, 
@@ -50,31 +52,32 @@ def setup_dataset(label_names, tokenizer):
 
     def preprocess(examples):
         imgs = [image_transforms(img) for img in examples["image"]]
-        label_ints = examples["label"]
-        label_name = [label_names[int(i)] for i in label_ints]
-        prompts = [f"a photo of a {name}" for name in label_name]
-
-        text_inputs = tokenizer(
-            prompts,
-            padding="max_length",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-            return_tensors="pt"
-        )
-
+        labels = examples["label"]
         return {
             "pixel_values": torch.stack(imgs),
-            "input_ids": text_inputs.input_ids,
+            "label": torch.tensor(labels, dtype=torch.long),
         }
     # dataset.set_transform(preprocess)
     processed_dataset = dataset.map(
         preprocess, 
         batched=True,
-        remove_columns=["image", "label"],
-        num_proc=config["num_workers"]
+        remove_columns=["image"],
+        num_proc=config["num_workers"],
+    )
+
+    processed_dataset = processed_dataset.with_format(
+        type="torch",
+        columns=["pixel_values", "label"]
     )
     print("accomplish processing")
     return processed_dataset
+
+def get_label_embeddings(label_names, tokenizer, text_encoder, device):
+    prompts = [f"a photo of a {name}" for name in label_names]
+    text_inputs = tokenizer(prompts, padding="max_length", max_length=tokenizer.model_max_length, return_tensors="pt")
+    with torch.no_grad():
+        text_embeddings = text_encoder(text_inputs.input_ids.to(device)).last_hidden_state
+    return text_embeddings
 
 def main():
     accelerator = Accelerator(
@@ -96,9 +99,11 @@ def main():
         )
         uncond_embeddings = text_encoder(uncond_input.input_ids).last_hidden_state
 
-    train_dataset = setup_dataset(labels_names, tokenizer)
+    label_embeddings = get_label_embeddings(labels_names, tokenizer, text_encoder, accelerator.device)
+    
+    train_dataset = setup_dataset(labels_names)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, num_workers=config["num_workers"])
+    train_dataloader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, drop_last=True, num_workers=config["num_workers"], persistent_workers=True, pin_memory=True)
 
     unet = UNet2DConditionModel(
         sample_size=config["image_size"],
@@ -110,16 +115,16 @@ def main():
         up_block_types=("UpBlock2D", "AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D"),
         cross_attention_dim=config["embedding_dim"]
     )
-
+    '''
     try:
         import xformers
         print("use Flash Attention")
         unet.enable_xformers_memory_efficient_attention()
     except ImportError:
         print("Not found xformers")
-
-    unet = torch.compile(unet, mode="max-autotune")
-    text_encoder = torch.compile(text_encoder, mode="max-autotune")
+    '''
+    unet = torch.compile(unet, mode="reduce-overhead")
+    # text_encoder = torch.compile(text_encoder, mode="max-autotune")
 
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000, beta_schedule="squaredcos_cap_v2")
 
@@ -136,6 +141,11 @@ def main():
         unet, optimizer, train_dataloader, lr_scheduler
     )
 
+    label_embeddings = label_embeddings.to(
+        accelerator.device,
+        dtype=torch.bfloat16 if config["mixed_precision"] == "bf16" else torch.float16
+    )
+
     text_encoder.to(accelerator.device)
     uncond_embeddings = uncond_embeddings.to(accelerator.device)
 
@@ -150,21 +160,24 @@ def main():
 
         for step, batch in enumerate(train_dataloader):
             images = batch["pixel_values"]
-            text_input_ids = batch["input_ids"]
+            label_ids = batch["label"].to(accelerator.device)
 
             with torch.no_grad():
-                text_embeddings = text_encoder(text_input_ids).last_hidden_state
+                text_embeddings = label_embeddings[label_ids]
 
             bs = images.shape[0]
             mask = torch.rand(bs, device=accelerator.device) < cond_drop_prob
-
             mask_expand = mask.view(bs, 1, 1)
 
-            final_embeddings = torch.where(mask_expand, uncond_embeddings, text_embeddings)
+            final_embeddings = torch.where(
+                mask_expand, 
+                uncond_embeddings.expand_as(text_embeddings).to(text_embeddings.dtype), 
+                text_embeddings
+            )
 
             noise = torch.randn_like(images)
             timesteps = torch.randint(
-                0, noise_scheduler.config.num_train_timesteps, (images.shape[0],), device=accelerator.device
+                0, noise_scheduler.config.num_train_timesteps, (bs,), device=accelerator.device
             ).long()
             noisy_images = noise_scheduler.add_noise(images, noise, timesteps)
 
