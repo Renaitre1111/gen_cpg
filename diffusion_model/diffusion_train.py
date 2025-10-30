@@ -18,19 +18,29 @@ config = {
     "image_size": 32,
     "batch_size": 1536,
     "num_epochs": 150,
-    "learning_rate": 2e-4,
+    "learning_rate": 3e-4,
     "embedding_dim": 512,
     "mixed_precision": "bf16",
     "save_freq_epochs": 10,
-    "num_workers": 16
+    "num_workers": 2
 }
 
 def get_imagenet_label_names():
     builder = load_dataset_builder(config["dataset_name"])
+    print(len(builder.info.features["label"].names))
     return builder.info.features["label"].names
 
 def setup_dataset(label_names, tokenizer):
     dataset = load_dataset(config["dataset_name"], split="train")
+
+    demo_split = dataset.train_test_split(
+        train_size=0.1, 
+        shuffle=True,
+        stratify_by_column="label"
+    )
+
+    dataset = demo_split["train"]
+    print(len(dataset))
 
     image_transforms = transforms.Compose([
         transforms.Lambda(lambda img: img.convert("RGB")),
@@ -56,8 +66,15 @@ def setup_dataset(label_names, tokenizer):
             "pixel_values": torch.stack(imgs),
             "input_ids": text_inputs.input_ids,
         }
-    dataset.set_transform(preprocess)
-    return dataset
+    # dataset.set_transform(preprocess)
+    processed_dataset = dataset.map(
+        preprocess, 
+        batched=True,
+        remove_columns=["image", "label"],
+        num_proc=config["num_workers"]
+    )
+    print("accomplish processing")
+    return processed_dataset
 
 def main():
     accelerator = Accelerator(
@@ -73,6 +90,12 @@ def main():
 
     labels_names = get_imagenet_label_names()
 
+    with torch.no_grad():
+        uncond_input = tokenizer(
+            [""], padding="max_length", max_length=tokenizer.model_max_length, return_tensors="pt"
+        )
+        uncond_embeddings = text_encoder(uncond_input.input_ids).last_hidden_state
+
     train_dataset = setup_dataset(labels_names, tokenizer)
 
     train_dataloader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, num_workers=config["num_workers"])
@@ -87,6 +110,16 @@ def main():
         up_block_types=("UpBlock2D", "AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D"),
         cross_attention_dim=config["embedding_dim"]
     )
+
+    try:
+        import xformers
+        print("use Flash Attention")
+        unet.enable_xformers_memory_efficient_attention()
+    except ImportError:
+        print("Not found xformers")
+
+    unet = torch.compile(unet, mode="max-autotune")
+    text_encoder = torch.compile(text_encoder, mode="max-autotune")
 
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000, beta_schedule="squaredcos_cap_v2")
 
@@ -104,6 +137,9 @@ def main():
     )
 
     text_encoder.to(accelerator.device)
+    uncond_embeddings = uncond_embeddings.to(accelerator.device)
+
+    cond_drop_prob = 0.1
 
     for epoch in range(config["num_epochs"]):
         unet.train()
@@ -119,6 +155,13 @@ def main():
             with torch.no_grad():
                 text_embeddings = text_encoder(text_input_ids).last_hidden_state
 
+            bs = images.shape[0]
+            mask = torch.rand(bs, device=accelerator.device) < cond_drop_prob
+
+            mask_expand = mask.view(bs, 1, 1)
+
+            final_embeddings = torch.where(mask_expand, uncond_embeddings, text_embeddings)
+
             noise = torch.randn_like(images)
             timesteps = torch.randint(
                 0, noise_scheduler.config.num_train_timesteps, (images.shape[0],), device=accelerator.device
@@ -129,7 +172,7 @@ def main():
                 noise_pred = unet(
                     noisy_images,
                     timesteps,
-                    encoder_hidden_states=text_embeddings
+                    encoder_hidden_states=final_embeddings
                 ).sample
                 loss = F.mse_loss(noise_pred, noise)
             total_loss += loss.item()
