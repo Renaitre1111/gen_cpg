@@ -39,11 +39,3 @@ python simsiam/finetune.py --data ./data/ --lb_idx_path simsiam/label_idx/cifar1
 
 # linear eval
 python simsiam/linear_eval.py --data ./data/ --pretrained simsiam/saved_model/checkpoint_final.pth --lb_idx_path simsiam/label_idx/cifar10/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx/lb_labels_400_100_4600_100_exp_random_noise_0.0_seed_1_idx.npy --arch resnet18 --lr 0.01 --epochs 100 --seed 0 --wd 0
-
-Traceback (most recent call last):
-  File "diffusion_model/generate_balanced_set.py", line 215, in <module>
-    main()
-  File "diffusion_model/generate_balanced_set.py", line 206, in main
-    group[i] = np.concatenate([group[i], imgs], axis=0)
-  File "<__array_function__ internals>", line 200, in concatenate
-ValueError: all the input arrays must have same number of dimensions, but the array at index 0 has 5 dimension(s) and the array at index 1 has 4 dimension(s)

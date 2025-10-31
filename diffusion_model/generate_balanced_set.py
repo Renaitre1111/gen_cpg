@@ -129,7 +129,7 @@ def gen_samples_for_class(
 
 def group_imgs_by_label(imgs, labels, classes):
     group = []
-    for lb in classes:
+    for lb in range(len(classes)):
         group.append(imgs[labels == lb])
     return group
 
